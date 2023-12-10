@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/gofiber/fiber/v2"
@@ -153,13 +154,20 @@ func compilePrices(tickers []Ticker, jupiterPrices map[string]JupiterPrice, bina
 		} else if t.Source == "binance" {
 			for _, bPrice := range binancePrices {
 				if bPrice.Symbol == t.Address {
+
+					lastPrice, err := strconv.ParseFloat(bPrice.LastPrice, 64)
+					if err != nil {
+						lastPrice = 0 // handle or log the error as appropriate
+					}
+
 					prices = append(prices, map[string]interface{}{
 						"symbol":  t.Symbol,
 						"ticker":  t.Ticker,
 						"address": t.Address,
-						"price":   bPrice.LastPrice,
+						"price":   lastPrice,
 						"source":  t.Source,
 					})
+
 				}
 			}
 		}
