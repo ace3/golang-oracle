@@ -11,6 +11,9 @@ import (
 
 	"github.com/avast/retry-go"
 	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v2/middleware/cache"
+	"github.com/gofiber/fiber/v2/middleware/compress"
+	"github.com/gofiber/fiber/v2/middleware/recover"
 )
 
 type Ticker struct {
@@ -50,6 +53,28 @@ type BinancePrice struct {
 
 func main() {
 	app := fiber.New()
+
+	// Initialize default config
+	app.Use(cache.New())
+
+	// Initialize default config
+	app.Use(recover.New())
+	// Or extend your config for customization
+	app.Use(cache.New(cache.Config{
+		Next: func(c *fiber.Ctx) bool {
+			return c.Query("noCache") == "true"
+		},
+		Expiration:   3 * time.Second,
+		CacheControl: true,
+	}))
+
+	// Initialize default config
+	app.Use(compress.New())
+
+	// Or extend your config for customization
+	app.Use(compress.New(compress.Config{
+		Level: compress.LevelBestSpeed, // 1
+	}))
 
 	app.Get("/prices", func(c *fiber.Ctx) error {
 		tickers := []Ticker{
