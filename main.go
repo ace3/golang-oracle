@@ -55,9 +55,6 @@ func main() {
 	app := fiber.New()
 
 	// Initialize default config
-	app.Use(cache.New())
-
-	// Initialize default config
 	app.Use(recover.New())
 	// Or extend your config for customization
 	app.Use(cache.New(cache.Config{
