@@ -7,7 +7,9 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
+	"github.com/avast/retry-go"
 	"github.com/gofiber/fiber/v2"
 )
 
@@ -59,14 +61,45 @@ func main() {
 
 		jupiterTickers, binanceTickers := filterTickers(tickers)
 
-		jupiterPrices, err := fetchJupiterPrices(jupiterTickers)
-		if err != nil {
-			return err
-		}
+		// Use channels to receive data and errors from goroutines
+		jupiterChan := make(chan map[string]JupiterPrice)
+		binanceChan := make(chan BinanceResponse)
+		errChan := make(chan error)
 
-		binancePrices, err := fetchBinancePrices(binanceTickers)
-		if err != nil {
-			return err
+		// Goroutine for fetching Jupiter prices
+		go func() {
+			jupiterPrices, err := fetchJupiterPrices(jupiterTickers)
+			if err != nil {
+				errChan <- err
+				return
+			}
+			jupiterChan <- jupiterPrices
+		}()
+
+		// Goroutine for fetching Binance prices
+		go func() {
+			binancePrices, err := fetchBinancePrices(binanceTickers)
+			if err != nil {
+				errChan <- err
+				return
+			}
+			binanceChan <- binancePrices
+		}()
+
+		// Initialize variables for the results
+		var jupiterPrices map[string]JupiterPrice
+		var binancePrices BinanceResponse
+
+		// Wait for both goroutines to finish
+		for i := 0; i < 2; i++ {
+			select {
+			case jPrices := <-jupiterChan:
+				jupiterPrices = jPrices
+			case bPrices := <-binanceChan:
+				binancePrices = bPrices
+			case err := <-errChan:
+				return err
+			}
 		}
 
 		prices := compilePrices(tickers, jupiterPrices, binancePrices)
@@ -95,20 +128,31 @@ func filterTickers(tickers []Ticker) (string, string) {
 }
 
 func fetchJupiterPrices(tickers string) (map[string]JupiterPrice, error) {
-	url := fmt.Sprintf("https://price.jup.ag/v4/price?ids=%s", tickers)
-	resp, err := http.Get(url)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
 	var jupiterResp JupiterResponse
-	body, err := ioutil.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
-	}
 
-	err = json.Unmarshal(body, &jupiterResp)
+	err := retry.Do(
+		func() error {
+			url := fmt.Sprintf("https://price.jup.ag/v4/price?ids=%s", tickers)
+			resp, reqErr := http.Get(url)
+			if reqErr != nil {
+				return reqErr
+			}
+			defer resp.Body.Close()
+
+			body, readErr := ioutil.ReadAll(resp.Body)
+			if readErr != nil {
+				return readErr
+			}
+
+			return json.Unmarshal(body, &jupiterResp)
+		},
+		retry.Attempts(3),        // Number of retry attempts
+		retry.Delay(time.Second), // Delay between retries
+		retry.OnRetry(func(n uint, err error) {
+			fmt.Printf("Retry #%d due to error: %v\n", n+1, err)
+		}),
+	)
+
 	if err != nil {
 		return nil, err
 	}
