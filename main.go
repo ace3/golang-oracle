@@ -3,7 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -152,7 +152,7 @@ func fetchJupiterPrices(tickers string) (map[string]domain.JupiterPrice, error) 
 			}
 			defer resp.Body.Close()
 
-			body, readErr := ioutil.ReadAll(resp.Body)
+			body, readErr := io.ReadAll(resp.Body)
 			if readErr != nil {
 				return readErr
 			}
@@ -182,7 +182,7 @@ func fetchBinancePrices(tickers string) (domain.BinanceResponse, error) {
 	defer resp.Body.Close()
 
 	var binanceResp domain.BinanceResponse
-	body, err := ioutil.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, err
 	}
