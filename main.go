@@ -9,130 +9,121 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ace3/golang-oracle/domain"
 	"github.com/avast/retry-go"
+	"github.com/go-co-op/gocron"
 	"github.com/gofiber/fiber/v2"
-	"github.com/gofiber/fiber/v2/middleware/cache"
 	"github.com/gofiber/fiber/v2/middleware/compress"
-	"github.com/gofiber/fiber/v2/middleware/recover"
+	fiberrecover "github.com/gofiber/fiber/v2/middleware/recover"
 )
 
-type Ticker struct {
+type JsonTicker struct {
 	Symbol  string `json:"symbol"`
 	Ticker  string `json:"ticker"`
 	Address string `json:"address"`
 	Source  string `json:"source"`
 }
 
-type JupiterResponse struct {
-	Data map[string]JupiterPrice `json:"data"`
-}
-
-type JupiterPrice struct {
-	Price float64 `json:"price"`
-}
-
-type BinanceResponse []BinancePrice
-
-type BinancePrice struct {
-	Symbol             string `json:"symbol"`
-	PriceChange        string `json:"priceChange"`
-	PriceChangePercent string `json:"priceChangePercent"`
-	WeightedAvgPrice   string `json:"weightedAvgPrice"`
-	OpenPrice          string `json:"openPrice"`
-	HighPrice          string `json:"highPrice"`
-	LowPrice           string `json:"lowPrice"`
-	LastPrice          string `json:"lastPrice"`
-	Volume             string `json:"volume"`
-	QuoteVolume        string `json:"quoteVolume"`
-	OpenTime           int64  `json:"openTime"`
-	CloseTime          int64  `json:"closeTime"`
-	FirstId            int64  `json:"firstId"`
-	LastId             int64  `json:"lastId"`
-	Count              int    `json:"count"`
-}
-
 func main() {
+	tickers := []JsonTicker{
+		{"Crypto.LST/USD", "LST", "LSTxxxnJzKDFSLr4dUkPcmCf5VyryEqzPLz5j4bpxFp", "jupiter"},
+		{"Crypto.JTO/USD", "JTO", "JTOUSDT", "binance"},
+		{"Crypto.RENDER/USD", "RENDER", "rndrizKT3MK1iimdxRdWabcF7Zg7AR5T4nud4EkHBof", "jupiter"},
+		{"Crypto.BTC/USD", "BTC", "BTCUSDT", "binance"},
+	}
+
 	app := fiber.New()
 
-	// Initialize default config
-	app.Use(recover.New())
-	// Or extend your config for customization
-	app.Use(cache.New(cache.Config{
-		Next: func(c *fiber.Ctx) bool {
-			return c.Query("noCache") == "true"
-		},
-		Expiration:   3 * time.Second,
-		CacheControl: true,
-	}))
+	var memoryPrices []interface{}
 
-	// Initialize default config
+	initialPrice, err := fetchTickers(tickers)
+	if err != nil {
+		panic(err)
+	}
+	memoryPrices = initialPrice
+
+	app.Use(fiberrecover.New())
+
 	app.Use(compress.New())
 
-	// Or extend your config for customization
 	app.Use(compress.New(compress.Config{
 		Level: compress.LevelBestSpeed, // 1
 	}))
 
 	app.Get("/prices", func(c *fiber.Ctx) error {
-		tickers := []Ticker{
-			{"Crypto.LST/USD", "LST", "LSTxxxnJzKDFSLr4dUkPcmCf5VyryEqzPLz5j4bpxFp", "jupiter"},
-			{"Crypto.JTO/USD", "JTO", "JTOUSDT", "binance"},
-			{"Crypto.RENDER/USD", "RENDER", "rndrizKT3MK1iimdxRdWabcF7Zg7AR5T4nud4EkHBof", "jupiter"},
-			{"Crypto.BTC/USD", "BTC", "BTCUSDT", "binance"},
-		}
 
-		jupiterTickers, binanceTickers := filterTickers(tickers)
-
-		// Use channels to receive data and errors from goroutines
-		jupiterChan := make(chan map[string]JupiterPrice)
-		binanceChan := make(chan BinanceResponse)
-		errChan := make(chan error)
-
-		// Goroutine for fetching Jupiter prices
-		go func() {
-			jupiterPrices, err := fetchJupiterPrices(jupiterTickers)
-			if err != nil {
-				errChan <- err
-				return
-			}
-			jupiterChan <- jupiterPrices
-		}()
-
-		// Goroutine for fetching Binance prices
-		go func() {
-			binancePrices, err := fetchBinancePrices(binanceTickers)
-			if err != nil {
-				errChan <- err
-				return
-			}
-			binanceChan <- binancePrices
-		}()
-
-		// Initialize variables for the results
-		var jupiterPrices map[string]JupiterPrice
-		var binancePrices BinanceResponse
-
-		// Wait for both goroutines to finish
-		for i := 0; i < 2; i++ {
-			select {
-			case jPrices := <-jupiterChan:
-				jupiterPrices = jPrices
-			case bPrices := <-binanceChan:
-				binancePrices = bPrices
-			case err := <-errChan:
-				return err
-			}
-		}
-
-		prices := compilePrices(tickers, jupiterPrices, binancePrices)
-
-		return c.JSON(prices)
+		return c.JSON(memoryPrices)
 	})
 
+	s := gocron.NewScheduler(time.UTC)
+	s.CronWithSeconds("* * * * * *").Do(func() {
+		defer func() {
+			if r := recover(); r != nil {
+				fmt.Println("Recovered in f", r)
+			}
+		}()
+		newTicker, err := fetchTickers(tickers)
+		if err != nil {
+			fmt.Println("Failed to fetch price")
+		} else {
+			memoryPrices = newTicker
+		}
+	})
+	s.StartAsync()
+
 	app.Listen(":3000")
+
 }
 
-func filterTickers(tickers []Ticker) (string, string) {
+func fetchTickers(tickers []JsonTicker) (prices []interface{}, err error) {
+	jupiterTickers, binanceTickers := filterTickers(tickers)
+
+	// Use channels to receive data and errors from goroutines
+	jupiterChan := make(chan map[string]domain.JupiterPrice)
+	binanceChan := make(chan domain.BinanceResponse)
+	errChan := make(chan error)
+
+	// Goroutine for fetching Jupiter prices
+	go func() {
+		jupiterPrices, err := fetchJupiterPrices(jupiterTickers)
+		if err != nil {
+			errChan <- err
+			return
+		}
+		jupiterChan <- jupiterPrices
+	}()
+
+	// Goroutine for fetching Binance prices
+	go func() {
+		binancePrices, err := fetchBinancePrices(binanceTickers)
+		if err != nil {
+			errChan <- err
+			return
+		}
+		binanceChan <- binancePrices
+	}()
+
+	// Initialize variables for the results
+	var jupiterPrices map[string]domain.JupiterPrice
+	var binancePrices domain.BinanceResponse
+
+	// Wait for both goroutines to finish
+	for i := 0; i < 2; i++ {
+		select {
+		case jPrices := <-jupiterChan:
+			jupiterPrices = jPrices
+		case bPrices := <-binanceChan:
+			binancePrices = bPrices
+		case err := <-errChan:
+			return nil, err
+		}
+	}
+
+	prices = compilePrices(tickers, jupiterPrices, binancePrices)
+	return prices, nil
+}
+
+func filterTickers(tickers []JsonTicker) (string, string) {
 	var jupiterTickers, binanceTickers string
 
 	for _, t := range tickers {
@@ -149,8 +140,8 @@ func filterTickers(tickers []Ticker) (string, string) {
 	return jupiterTickers, "[" + binanceTickers + "]"
 }
 
-func fetchJupiterPrices(tickers string) (map[string]JupiterPrice, error) {
-	var jupiterResp JupiterResponse
+func fetchJupiterPrices(tickers string) (map[string]domain.JupiterPrice, error) {
+	var jupiterResp domain.JupiterResponse
 
 	err := retry.Do(
 		func() error {
@@ -182,7 +173,7 @@ func fetchJupiterPrices(tickers string) (map[string]JupiterPrice, error) {
 	return jupiterResp.Data, nil
 }
 
-func fetchBinancePrices(tickers string) (BinanceResponse, error) {
+func fetchBinancePrices(tickers string) (domain.BinanceResponse, error) {
 	url := fmt.Sprintf("https://api.binance.com/api/v3/ticker?symbols=%s", tickers)
 	resp, err := http.Get(url)
 	if err != nil {
@@ -190,7 +181,7 @@ func fetchBinancePrices(tickers string) (BinanceResponse, error) {
 	}
 	defer resp.Body.Close()
 
-	var binanceResp BinanceResponse
+	var binanceResp domain.BinanceResponse
 	body, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
 		return nil, err
@@ -204,7 +195,7 @@ func fetchBinancePrices(tickers string) (BinanceResponse, error) {
 	return binanceResp, nil
 }
 
-func compilePrices(tickers []Ticker, jupiterPrices map[string]JupiterPrice, binancePrices BinanceResponse) []interface{} {
+func compilePrices(tickers []JsonTicker, jupiterPrices map[string]domain.JupiterPrice, binancePrices domain.BinanceResponse) []interface{} {
 	var prices []interface{}
 
 	for _, t := range tickers {
