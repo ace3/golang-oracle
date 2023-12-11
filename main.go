@@ -73,10 +73,10 @@ func main() {
 		Level: compress.LevelBestSpeed, // 1
 	}))
 
-	app.Get("/prices", func(c *fiber.Ctx) error {
+	app.Get("/home/prices", func(c *fiber.Ctx) error {
 		tickers := []Ticker{
 			{"Crypto.LST/USD", "LST", "LSTxxxnJzKDFSLr4dUkPcmCf5VyryEqzPLz5j4bpxFp", "jupiter"},
-			{"Crypto.JTO/USD", "JTO", "jtojtomepa8beP8AuQc6eXt5FriJwfFMwQx2v2f9mCL", "jupiter"},
+			{"Crypto.JTO/USD", "JTO", "JTOUSDT", "binance"},
 			{"Crypto.RENDER/USD", "RENDER", "rndrizKT3MK1iimdxRdWabcF7Zg7AR5T4nud4EkHBof", "jupiter"},
 			{"Crypto.BTC/USD", "BTC", "BTCUSDT", "binance"},
 		}
@@ -129,7 +129,7 @@ func main() {
 		return c.JSON(prices)
 	})
 
-	app.Listen(":3000")
+	app.Listen(":3001")
 }
 
 func filterTickers(tickers []Ticker) (string, string) {
