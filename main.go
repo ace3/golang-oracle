@@ -129,7 +129,7 @@ func main() {
 		return c.JSON(prices)
 	})
 
-	app.Listen(":3001")
+	app.Listen(":3000")
 }
 
 func filterTickers(tickers []Ticker) (string, string) {
