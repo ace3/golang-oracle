@@ -1,16 +1,14 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/ace3/golang-oracle/domain"
-	"github.com/avast/retry-go"
+	"github.com/ace3/golang-oracle/service"
+
 	"github.com/go-co-op/gocron"
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/compress"
@@ -85,7 +83,7 @@ func fetchTickers(tickers []JsonTicker) (prices []interface{}, err error) {
 
 	// Goroutine for fetching Jupiter prices
 	go func() {
-		jupiterPrices, err := fetchJupiterPrices(jupiterTickers)
+		jupiterPrices, err := service.FetchJupiterPrices(jupiterTickers)
 		if err != nil {
 			errChan <- err
 			return
@@ -95,7 +93,7 @@ func fetchTickers(tickers []JsonTicker) (prices []interface{}, err error) {
 
 	// Goroutine for fetching Binance prices
 	go func() {
-		binancePrices, err := fetchBinancePrices(binanceTickers)
+		binancePrices, err := service.FetchBinancePrices(binanceTickers)
 		if err != nil {
 			errChan <- err
 			return
@@ -138,61 +136,6 @@ func filterTickers(tickers []JsonTicker) (string, string) {
 	binanceTickers = strings.TrimSuffix(binanceTickers, ",")
 
 	return jupiterTickers, "[" + binanceTickers + "]"
-}
-
-func fetchJupiterPrices(tickers string) (map[string]domain.JupiterPrice, error) {
-	var jupiterResp domain.JupiterResponse
-
-	err := retry.Do(
-		func() error {
-			url := fmt.Sprintf("https://price.jup.ag/v4/price?ids=%s", tickers)
-			resp, reqErr := http.Get(url)
-			if reqErr != nil {
-				return reqErr
-			}
-			defer resp.Body.Close()
-
-			body, readErr := io.ReadAll(resp.Body)
-			if readErr != nil {
-				return readErr
-			}
-
-			return json.Unmarshal(body, &jupiterResp)
-		},
-		retry.Attempts(3),        // Number of retry attempts
-		retry.Delay(time.Second), // Delay between retries
-		retry.OnRetry(func(n uint, err error) {
-			fmt.Printf("Retry #%d due to error: %v\n", n+1, err)
-		}),
-	)
-
-	if err != nil {
-		return nil, err
-	}
-
-	return jupiterResp.Data, nil
-}
-
-func fetchBinancePrices(tickers string) (domain.BinanceResponse, error) {
-	url := fmt.Sprintf("https://api.binance.com/api/v3/ticker?symbols=%s", tickers)
-	resp, err := http.Get(url)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	var binanceResp domain.BinanceResponse
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
-	}
-
-	err = json.Unmarshal(body, &binanceResp)
-	if err != nil {
-		return nil, err
-	}
-
-	return binanceResp, nil
 }
 
 func compilePrices(tickers []JsonTicker, jupiterPrices map[string]domain.JupiterPrice, binancePrices domain.BinanceResponse) []interface{} {
