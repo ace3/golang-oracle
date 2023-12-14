@@ -11,29 +11,18 @@ jobs:
     environment: main
 
     steps:
-      - name: Check out code
-        uses: actions/checkout@v2
-
-      - name: Set up Go
-        uses: actions/setup-go@v2
-        with:
-          go-version: '1.21' # Set this to your Go version
-
-      - name: Build
-        run: go build main.go
-
-      - name: Deploy to Server
-        uses: appleboy/scp-action@v0.1.4
+      - name: Git Pull
+        uses: appleboy/ssh-action@master
         with:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SERVER_SSH_KEY }}
           port: ${{ secrets.SERVER_PORT }}
-          source: '.' # Set this to your build artifacts
-          target: '/home/ubuntu/projects/golang-oracle/'
+          script: |
+            cd /home/ubuntu/projects/golang-oracle && git pull && go build main.go
 
       - name: Restart Service
-        uses: appleboy/ssh-action@v0.1.4
+        uses: appleboy/ssh-action@master
         with:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SERVER_USER }}
