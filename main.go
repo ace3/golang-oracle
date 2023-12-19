@@ -15,19 +15,13 @@ import (
 	fiberrecover "github.com/gofiber/fiber/v2/middleware/recover"
 )
 
-type JsonTicker struct {
-	Symbol  string `json:"symbol"`
-	Ticker  string `json:"ticker"`
-	Address string `json:"address"`
-	Source  string `json:"source"`
-}
-
 func main() {
-	tickers := []JsonTicker{
-		{"Crypto.LST/USD", "LST", "LSTxxxnJzKDFSLr4dUkPcmCf5VyryEqzPLz5j4bpxFp", "jupiter"},
-		{"Crypto.JTO/USD", "JTO", "JTOUSDT", "binance"},
-		{"Crypto.RENDER/USD", "RENDER", "rndrizKT3MK1iimdxRdWabcF7Zg7AR5T4nud4EkHBof", "jupiter"},
-		{"Crypto.BTC/USD", "BTC", "BTCUSDT", "binance"},
+	tickers := []domain.JsonTicker{
+		{Symbol: "Crypto.LST/USD", Ticker: "LST", Address: "LSTxxxnJzKDFSLr4dUkPcmCf5VyryEqzPLz5j4bpxFp", Source: "jupiter"},
+		{Symbol: "Crypto.JTO/USD", Ticker: "JTO", Address: "JTOUSDT", Source: "binance"},
+		{Symbol: "Crypto.RENDER/USD", Ticker: "RENDER", Address: "rndrizKT3MK1iimdxRdWabcF7Zg7AR5T4nud4EkHBof", Source: "jupiter"},
+		{Symbol: "Crypto.BTC/USD", Ticker: "BTC", Address: "BTCUSDT", Source: "binance"},
+		{Symbol: "Crypto.BUSD/USD", Ticker: "BUSD", Address: "ethereum/0x5e35c4eba72470ee1177dcb14dddf4d9e6d915f4", Source: "dexscreener"},
 	}
 
 	app := fiber.New()
@@ -73,7 +67,7 @@ func main() {
 
 }
 
-func fetchTickers(tickers []JsonTicker) (prices []interface{}, err error) {
+func fetchTickers(tickers []domain.JsonTicker) (prices []interface{}, err error) {
 	jupiterTickers, binanceTickers := filterTickers(tickers)
 
 	// Use channels to receive data and errors from goroutines
@@ -117,11 +111,12 @@ func fetchTickers(tickers []JsonTicker) (prices []interface{}, err error) {
 		}
 	}
 
-	prices = compilePrices(tickers, jupiterPrices, binancePrices)
+	dexscreenerPrice, _ := service.FetchDexScreener(tickers)
+	prices = compilePrices(tickers, jupiterPrices, binancePrices, dexscreenerPrice)
 	return prices, nil
 }
 
-func filterTickers(tickers []JsonTicker) (string, string) {
+func filterTickers(tickers []domain.JsonTicker) (string, string) {
 	var jupiterTickers, binanceTickers string
 
 	for _, t := range tickers {
@@ -138,7 +133,7 @@ func filterTickers(tickers []JsonTicker) (string, string) {
 	return jupiterTickers, "[" + binanceTickers + "]"
 }
 
-func compilePrices(tickers []JsonTicker, jupiterPrices map[string]domain.JupiterPrice, binancePrices domain.BinanceResponse) []interface{} {
+func compilePrices(tickers []domain.JsonTicker, jupiterPrices map[string]domain.JupiterPrice, binancePrices domain.BinanceResponse, dexscreenerPrice []domain.DexScreenerPrice) []interface{} {
 	var prices []interface{}
 
 	for _, t := range tickers {
@@ -169,6 +164,16 @@ func compilePrices(tickers []JsonTicker, jupiterPrices map[string]domain.Jupiter
 					})
 
 				}
+			}
+		} else if t.Source == "dexscreener" {
+			for _, v := range dexscreenerPrice {
+				prices = append(prices, map[string]interface{}{
+					"symbol":  t.Symbol,
+					"ticker":  t.Ticker,
+					"address": t.Address,
+					"price":   v.Price,
+					"source":  t.Source,
+				})
 			}
 		}
 	}
